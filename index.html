@@ -100,6 +100,9 @@ footer{padding:28px 16px 36px;text-align:center;color:var(--mute);font-size:14px
 <div id="adminActions" hidden style="margin-bottom:12px">
 <button onclick="addPlayer()">Add player</button>
 <button onclick="resetScores()">Reset all scores</button>
+<button onclick="exportData()">Download data.json</button>
+<button onclick="discard()">Discard unpublished edits</button>
+<p class="hint" id="dirtyMsg" style="margin:10px 0 0"></p>
 </div>
 <div class="scroll"><table id="standings"></table></div>
 </section>
@@ -117,22 +120,44 @@ const LEGS=[
 ["Circe's Enchanted Island","Circe Dink Spell"],
 ["The Deadly Passage","Charybdis Rally Storm"],
 ["The Final Road to Glory","Ithaca Match Point"]];
-let admin=false, view="all", data=load();
+let admin=false, view="all", dirty=false, data=fresh();
 
 function fresh(){
  const p=[];
  for(let i=1;i<=12;i++)p.push({name:"Titan "+i,g:i<=6?"M":"F",photo:"",scores:[0,0,0,0,0,0]});
  return{players:p};
 }
-function load(){
- try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.players)return d;}catch(e){}
- try{ // migrate the first version's data
-  const o=JSON.parse(localStorage.getItem("odyssey_data"));
-  if(o&&o.players)return{players:o.players.map((p,i)=>({name:p.name,g:i%2?"F":"M",photo:p.photo||"",scores:p.scores}))};
- }catch(e){}
- return fresh();
+function draft(){try{return JSON.parse(localStorage.getItem(KEY));}catch(e){return null;}}
+function edit(){
+ dirty=true;
+ try{localStorage.setItem(KEY,JSON.stringify({dirty:true,players:data.players}));}catch(e){}
+ refresh();
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(data));}catch(e){}}
+async function init(){
+ let pub=null;
+ try{const r=await fetch("data.json?t="+Date.now(),{cache:"no-store"});if(r.ok)pub=await r.json();}catch(e){}
+ const dr=draft();
+ if(pub&&pub.players)data={players:pub.players};
+ if(dr&&dr.dirty&&dr.players){
+  if(pub&&JSON.stringify(pub.players)===JSON.stringify(dr.players)){try{localStorage.removeItem(KEY);}catch(e){}}
+  else{data={players:dr.players};dirty=true;}
+ }
+ refresh();
+}
+function exportData(){
+ const blob=new Blob([JSON.stringify({players:data.players})],{type:"application/json"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="data.json";a.click();
+}
+function discard(){
+ if(!confirm("Throw away your unpublished edits and reload the published data?"))return;
+ try{localStorage.removeItem(KEY);}catch(e){}
+ location.reload();
+}
+function renderBanner(){
+ document.getElementById("dirtyMsg").textContent=dirty
+  ?"You have unpublished changes. Download data.json, then upload it to GitHub to show them to everyone."
+  :"No unpublished changes.";
+}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const total=p=>p.scores.reduce((a,b)=>a+b,0);
 const ini=n=>n.split(/\s+/).map(w=>w[0]).join("").slice(0,2).toUpperCase();
@@ -194,7 +219,7 @@ function renderRoster(){
   <small style="color:var(--mute)">${p.g==="M"?"Odysseus Award":"Athena Award"}</small>
   ${admin?`<input type="file" accept="image/*" aria-label="Photo for ${esc(p.name)}" onchange="uploadPhoto(event,${i})">`:""}</div>`;}).join("");
 }
-function refresh(){renderStats();renderLegs();renderAwards();renderTabs();renderPodium();renderStandings();renderRoster();save();}
+function refresh(){renderStats();renderLegs();renderAwards();renderTabs();renderPodium();renderStandings();renderRoster();renderBanner();}
 
 function toggleAdmin(){
  if(admin){admin=false;}
@@ -203,11 +228,11 @@ function toggleAdmin(){
  document.getElementById("adminBtn").textContent=admin?"Log out of admin":"Admin login";
  refresh();
 }
-function upd(i,k,v){data.players[i][k]=v;refresh();}
-function setScore(i,b,v){data.players[i].scores[b]=Math.max(0,parseInt(v)||0);refresh();}
-function addPlayer(){data.players.push({name:"New Titan",g:view==="F"?"F":"M",photo:"",scores:[0,0,0,0,0,0]});refresh();}
-function removePlayer(i){if(confirm("Remove "+data.players[i].name+"?")){data.players.splice(i,1);refresh();}}
-function resetScores(){if(confirm("Set every score back to 0?")){data.players.forEach(p=>p.scores=[0,0,0,0,0,0]);refresh();}}
+function upd(i,k,v){data.players[i][k]=v;edit();}
+function setScore(i,b,v){data.players[i].scores[b]=Math.max(0,parseInt(v)||0);edit();}
+function addPlayer(){data.players.push({name:"New Titan",g:view==="F"?"F":"M",photo:"",scores:[0,0,0,0,0,0]});edit();}
+function removePlayer(i){if(confirm("Remove "+data.players[i].name+"?")){data.players.splice(i,1);edit();}}
+function resetScores(){if(confirm("Set every score back to 0?")){data.players.forEach(p=>p.scores=[0,0,0,0,0,0]);edit();}}
 function uploadPhoto(e,i){
  const f=e.target.files[0];if(!f)return;
  const r=new FileReader();
@@ -215,10 +240,10 @@ function uploadPhoto(e,i){
   const c=document.createElement("canvas"),s=160;c.width=c.height=s;
   const m=Math.min(im.width,im.height);
   c.getContext("2d").drawImage(im,(im.width-m)/2,(im.height-m)/2,m,m,0,0,s,s);
-  data.players[i].photo=c.toDataURL("image/jpeg",.8);refresh();};im.src=x.target.result;};
+  data.players[i].photo=c.toDataURL("image/jpeg",.8);edit();};im.src=x.target.result;};
  r.readAsDataURL(f);
 }
-refresh();
+init();
 </script>
 </body>
 </html>
